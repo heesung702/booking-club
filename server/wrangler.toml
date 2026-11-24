@@ -1,0 +1,20 @@
+# 부킹 클럽 실시간 서버 (Cloudflare Workers + Durable Objects, 무료 플랜)
+# 비밀번호(STATS_KEY)는 여기 쓰지 않습니다. GitHub Secrets -> 배포 때 Cloudflare 비밀값으로 넣습니다.
+name = "booking-club"
+main = "src/index.js"
+compatibility_date = "2025-10-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://heesung702.github.io,http://localhost:8080,http://127.0.0.1:8080"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[durable_objects.bindings]]
+name = "STATS"
+class_name = "Stats"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room", "Stats"]
