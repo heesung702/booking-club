@@ -1,9 +1,9 @@
 # 실시간 서버(server/)를 Cloudflare에 올립니다. main에 server/ 변경이 들어오면 자동 실행.
-# 필요한 GitHub Secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, STATS_KEY(통계 페이지 비밀번호)
+# 필요한 GitHub Secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, STATS_KEY_BOOKING(통계 페이지 비밀번호)
 name: Deploy server (Cloudflare)
 on:
   push:
-    branches: [main]
+    branches: [main, claude/project-thread-4jakh8]
     paths: ['server/**', '.github/workflows/deploy-server.yml']
   workflow_dispatch:
 permissions:
@@ -28,6 +28,6 @@ jobs:
         run: npx wrangler deploy
       - name: Set stats password
         env:
-          STATS_KEY: ${{ secrets.STATS_KEY }}
+          STATS_KEY: ${{ secrets.STATS_KEY_BOOKING }}
         run: |
           if [ -n "$STATS_KEY" ]; then printf '%s' "$STATS_KEY" | npx wrangler secret put STATS_KEY; else echo "STATS_KEY not set, skipping"; fi

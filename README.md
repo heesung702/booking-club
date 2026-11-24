@@ -11,7 +11,7 @@
   - 일자별 통계: `<서버주소>/stats` (비밀번호 필요). 입장수, 순 사용자, 신규, 재방문, 최대 동시 접속.
     브라우저에 저장한 무작위 번호의 해시만 저장하고 이름·IP는 저장하지 않습니다.
 - `.github/workflows/deploy-server.yml`: main에 `server/` 변경이 들어오면 자동 배포.
-  필요한 Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `STATS_KEY`
+  필요한 Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `STATS_KEY_BOOKING`
 
 로컬 시험: `cd server && npm install && npx wrangler dev`, 다른 창에서 `python3 -m http.server 8080` 후
 `http://localhost:8080/?server=ws://127.0.0.1:8787/ws` 를 여러 창으로 열기. 비밀번호는 `server/.dev.vars`(커밋 안 됨)에 `STATS_KEY=...`.
