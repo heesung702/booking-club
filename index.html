@@ -721,7 +721,7 @@ function onBeat(i){
 
 /* ---------- Together: other people in the same room (no chat, only movement, dances and fixed reactions) ---------- */
 const qs = new URLSearchParams(location.search), LOCAL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-const SERVER = (LOCAL && qs.get('server')) || '';
+const SERVER = (LOCAL && qs.get('server')) || 'wss://booking-club.heesung702.workers.dev/ws';
 const rid = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
 // Anonymous visit number for daily counts: a random code kept in this browser only. No name, e-mail or IP is stored.
 let vid = ''; try { vid = localStorage.getItem('bk_vid') || ''; if (!/^[a-z0-9]{8,40}$/.test(vid)){ vid = rid(); localStorage.setItem('bk_vid', vid); } } catch (e){ vid = rid(); }
