@@ -1,3 +1,6 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>부킹 클럽</title>
 <meta name="description" content="야외 페스티벌에서 귀여운 캐릭터와 함께 춤추는 웹 3D 클럽. 설치 없이 바로 입장.">
 <meta property="og:title" content="부킹 클럽">
@@ -48,6 +51,7 @@ button:focus-visible{outline:3px solid var(--suit);outline-offset:2px}
 .reacts button .k{font-size:11px;color:var(--muted);font-weight:700}
 .reacts button:active{transform:scale(.94)}
 .hint{min-width:0;max-width:100%;overflow-wrap:anywhere;line-height:1.5;text-align:center;font-size:12px;color:var(--fg);margin-bottom:8px;text-shadow:0 1px 6px rgba(20,10,50,.9)}
+.who{position:fixed;left:max(16px,env(safe-area-inset-left,0px));top:calc(env(safe-area-inset-top,0px) + 52px);background:var(--panel);border:1px solid var(--line);padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;pointer-events:none}
 .toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 66px);transform:translateX(-50%);padding:8px 16px;border-radius:999px;
   font-weight:900;font-size:18px;color:var(--ink);background:var(--suit);box-shadow:0 0 24px rgba(255,212,0,.7);white-space:nowrap;pointer-events:none}
 
@@ -81,6 +85,7 @@ button:focus-visible{outline:3px solid var(--suit);outline-offset:2px}
 </div>
 
 <div class="toast" id="toast" hidden></div>
+<div class="who" id="who" hidden></div>
 
 <div class="hud bottom" id="hudBottom" hidden>
   <div class="reacts">
@@ -112,7 +117,7 @@ button:focus-visible{outline:3px solid var(--suit);outline-offset:2px}
       <button id="btnReroll">다시 뽑기</button>
     </div>
     <button class="enter" id="btnEnter">입장하기</button>
-    <p>입장하면 음악이 나와요. 시제품이라 다른 댄서 5명은 컴퓨터예요.</p>
+    <p>입장하면 음악이 나와요. 같은 방 사람들과 같은 박자로 춰요. 사람이 적을 땐 컴퓨터 댄서가 함께 춰요.</p>
   </div>
 </div>
 
@@ -134,10 +139,19 @@ $('btnReroll').addEventListener('click', () => { myId = makeId(); $('idBox').tex
 /* ---------- Music: every sound is synthesized here, no audio files ---------- */
 const BPM = 122, BEAT = 60/BPM, STEP = BEAT/4;
 let ctx = null, t0 = 0, nextStep = 0, master = null, bus = null, noiseBuf = null, muted = false;
-const visualStart = performance.now()/1000;
+// One shared clock for everyone: the beat comes from the server's time, so music and dances line up on every screen (that is what makes 떼춤 work).
+const EPOCH = Date.UTC(2026, 0, 1), perfBase = Date.now() - performance.now();
+let clockOffset = 0;
+const gsec = () => (performance.now() + perfBase + clockOffset - EPOCH)/1000;
 function beatNow(){
-  if (ctx && ctx.state === 'running') return Math.max(0, (ctx.currentTime - t0)/BEAT);
-  return (performance.now()/1000 - visualStart)/BEAT;
+  if (ctx && ctx.state === 'running') return (ctx.currentTime - t0)/BEAT;
+  return gsec()/BEAT;
+}
+function syncAudio(force){
+  if (!ctx || ctx.state !== 'running') return;
+  const want = ctx.currentTime - gsec();
+  if (!force && Math.abs(want - t0) < 0.04) return;
+  t0 = want; nextStep = Math.ceil((ctx.currentTime + 0.05 - t0)/STEP);
 }
 const hz = m => 440*Math.pow(2,(m-69)/12);
 // Three moods take turns, 32 bars each (about a minute in this prototype): sunset, night, neon midnight. Each has its own chords, melody and sound.
@@ -187,8 +201,10 @@ function playStep(n, t){
   if (L.l){ const m = song.ld[bar % 2][s]; if (m) tone(t, song.wave, hz(m), song.lg, 0.28); }
   if (L.r && bar % 8 === 6 && s === 0) riser(t, BEAT*8);
 }
+let lastSync = 0;
 function schedule(){
   if (!ctx || ctx.state !== 'running') return;
+  if (ctx.currentTime - lastSync > 4){ lastSync = ctx.currentTime; syncAudio(false); }
   while (t0 + nextStep*STEP < ctx.currentTime + 0.14){
     const t = t0 + nextStep*STEP;
     if (t > ctx.currentTime - 0.03) playStep(nextStep, Math.max(t, ctx.currentTime));
@@ -203,13 +219,13 @@ function startAudio(){
   bus = ctx.createGain(); bus.connect(master);
   noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
   const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random()*2 - 1;
-  const p = ctx.resume ? ctx.resume() : null; if (p && p.catch) p.catch(() => {});
-  t0 = ctx.currentTime + 0.15; nextStep = 0; lastBeat = -1;
+  syncAudio(true);
+  const p = ctx.resume ? ctx.resume() : null; if (p && p.then) p.then(() => syncAudio(true), () => {});
   setInterval(schedule, 25);
 }
 document.addEventListener('visibilitychange', () => {
   if (!ctx) return;
-  if (document.hidden) ctx.suspend(); else ctx.resume();
+  if (document.hidden) ctx.suspend(); else { const p = ctx.resume(); if (p && p.then) p.then(() => syncAudio(true), () => {}); }
 });
 
 /* ---------- Scene: an open-air festival field at dusk ---------- */
@@ -569,7 +585,7 @@ function makeAvatar(name, variant, mine){
   const burger = new THREE.Group(); burger.visible = false; burger.position.set(0, -0.43, 0.02); burger.rotation.x = 1.15; arms[1].add(burger);
   const bt = new THREE.Mesh(G.bunTop, bunMat); bt.position.y = 0.035; bt.scale.y = 0.75; burger.add(bt); const lf = new THREE.Mesh(G.leaf, leafMat); lf.position.y = 0.03; burger.add(lf);
   burger.add(new THREE.Mesh(G.patty, pattyMat)); const bb = new THREE.Mesh(G.bunBot, bunMat); bb.position.y = -0.04; burger.add(bb);
-  const helmet = new THREE.Group(); helmet.visible = false; head.add(helmet);
+  const helmet = new THREE.Group(); helmet.visible = placeId === 1; head.add(helmet);
   const glass = new THREE.Mesh(G.helmet, glassMat); glass.position.y = 0.36; helmet.add(glass);
   const neck = new THREE.Mesh(G.neckRing, neckMat); neck.rotation.x = Math.PI/2; neck.position.y = -0.02; helmet.add(neck);
   const glint = new THREE.Mesh(G.glint, shineMat); glint.scale.set(1, 1.8, 1); glint.position.set(0.26, 0.6, 0.33); glint.rotation.z = -0.5; helmet.add(glint);
@@ -578,8 +594,8 @@ function makeAvatar(name, variant, mine){
   const ring = new THREE.Mesh(G.ring, basic(0xffffff, {transparent:true, opacity:0, depthWrite:false})); ring.rotation.x = -Math.PI/2; ring.position.y = 0.03; root.add(ring);
   const bubble = new THREE.Sprite(new THREE.SpriteMaterial({map:BUBBLES[1], transparent:true, depthWrite:false})); bubble.position.y = 1.86*shape[1] + 0.74; bubble.visible = false; root.add(bubble);
   scene.add(root);
-  const av = {root, rig, sq, head, legs, arms, ring, shadow, tag, bubble, helmet, cup, burger, seat:null, item:0, restUntil:0, ph:Math.random()*6, react:0, reactStart:0, reactEnd:0, reactFace:0, sy:shape[1], move:0, pending:-1, face:0, home:0, target:new THREE.Vector3(), walkT:0, group:null, bot:false, moveSince:0, mode:'free', leader:null, joinUntil:0, cool:0, social:1};
-  avatars.push(av); return av;
+  const av = {root, rig, sq, head, legs, arms, ring, shadow, tag, bubble, helmet, cup, burger, name, nid:'', seat:null, item:0, restUntil:0, ph:Math.random()*6, react:0, reactStart:0, reactEnd:0, reactFace:0, sy:shape[1], move:0, pending:-1, face:0, home:0, target:new THREE.Vector3(), walkT:0, group:null, bot:false, moveSince:0, mode:'free', leader:null, joinUntil:0, cool:0, social:1};
+  av.variant = variant; avatars.push(av); return av;
 }
 function place(av, x, z){ av.root.position.set(x, 0, z); av.target.set(x, 0, z); }
 function standUp(av){ if (av.seat){ av.seat.by = null; av.seat = null; } av.item = 0; }
@@ -595,20 +611,35 @@ function react(av, type, toward, secs){
   const now = performance.now()/1000; av.react = type; av.reactStart = now; av.reactEnd = now + secs;
   av.reactFace = toward ? Math.atan2(toward.root.position.x - av.root.position.x, toward.root.position.z - av.root.position.z) : av.home;
   av.bubble.material.map = BUBBLES[type]; av.bubble.visible = true;
+  if (type < 3 && net.open){
+    const to = toward ? toward.nid : '';
+    if (av === player) send({t:'r', k:type, to}); else if (net.host && bots.includes(av)) send({t:'b', op:'r', id:av.nid, k:type, to});
+  }
 }
 
-const player = makeAvatar(myId, 0, true); place(player, 0, 3.2);
+const myVariant = Math.floor(Math.random()*6);
+const player = makeAvatar(myId, myVariant, true); player.nid = 'me'; place(player, (Math.random() - 0.5)*6, 2 + Math.random()*2.2);
 const usedNames = new Set([myId]);
 const BOT_START = [[-4.4,-1.5],[4.4,-2.5],[-5.6,2.6],[5.6,2],[0.6,-5.2]];
-const bots = BOT_START.map((p, i) => {
-  let n; do { n = makeId(); } while (usedNames.has(n)); usedNames.add(n);
-  const b = makeAvatar(n, i + 1, false); b.bot = true; place(b, p[0], p[1]);
-  b.home = (Math.random() - 0.5)*0.9; b.face = b.home; b.move = 1 + Math.floor(Math.random()*MOVES); b.social = 0.6 + Math.random()*0.7; return b;
-});
+// Computer dancers. Alone (or as the room's host) this screen runs them; otherwise they arrive from the server like everyone else.
+const bots = [];
+function addBot(x, z, name, v, nid, move){
+  let n = name; if (!n){ do { n = makeId(); } while (usedNames.has(n)); } usedNames.add(n);
+  const b = makeAvatar(n, v == null ? 1 + Math.floor(Math.random()*5) : v, false); b.bot = true; b.nid = nid || 'b' + Math.random().toString(36).slice(2, 8);
+  place(b, x, z); b.home = (Math.random() - 0.5)*0.9; b.face = b.home; b.move = move == null ? 1 + Math.floor(Math.random()*MOVES) : move; b.social = 0.6 + Math.random()*0.7;
+  bots.push(b); return b;
+}
+function removeAvatar(av){
+  standUp(av); scene.remove(av.root); usedNames.delete(av.name);
+  let i = avatars.indexOf(av); if (i >= 0) avatars.splice(i, 1);
+  i = bots.indexOf(av); if (i >= 0) bots.splice(i, 1);
+  bots.forEach(b => { if (b.leader === av){ b.leader = null; b.mode = 'free'; } });
+}
+BOT_START.forEach((p, i) => addBot(p[0], p[1], null, i + 1));
 const dj = makeAvatar('DJ', 2, false); place(dj, 0, -15.1); dj.root.position.y = 1.0; dj.move = 4; dj.isDj = true; dj.shadow.visible = false;
 
 /* ---------- Group dance (떼춤) ---------- */
-// Prototype thresholds (only six dancers exist here): 3 = floor glow, 4 = sparkles, 5 = fireworks. The live service uses 3 / 6 / 10.
+// Small rooms: 3 = floor glow, 4 = sparkles, 5 = fireworks. Busy rooms (more than 10 dancers): 3 / 6 / 10.
 let groups = [], myGroupSize = 0, bestTier = 0;
 const groupDisc = new THREE.Mesh(new THREE.CircleGeometry(4.2, 40), basic(0xffffff, {transparent:true, opacity:0, depthWrite:false})); groupDisc.rotation.x = -Math.PI/2; groupDisc.position.y = 0.027; scene.add(groupDisc);
 function findGroups(){
@@ -624,7 +655,8 @@ function findGroups(){
     }
   }
   myGroupSize = player.group ? player.group.size : 0;
-  bestTier = groups.reduce((t, g) => Math.max(t, g.size >= 5 ? 3 : g.size >= 4 ? 2 : 1), 0);
+  const busy = dancers.length > 10, T2 = busy ? 6 : 4, T3 = busy ? 10 : 5;
+  bestTier = groups.reduce((t, g) => Math.max(t, g.size >= T3 ? 3 : g.size >= T2 ? 2 : 1), 0);
   const toast = $('toast');
   if (myGroupSize >= 3 && entered){ toast.textContent = '떼춤 ' + myGroupSize + '명!'; toast.hidden = false; } else toast.hidden = true;
 }
@@ -640,7 +672,7 @@ function botBar(i){
     if (r < 0.22){ const a = Math.random()*Math.PI*2, d = Math.random()*9.5; b.target.set(Math.cos(a)*d, 0, Math.sin(a)*d); }
     else if (r < 0.36) b.pending = 1 + Math.floor(Math.random()*MOVES);
     else if (r < 0.43) b.pending = 0;
-    else if (r < 0.58 && entered && !watching && !b.react && player.move > 0 && i - player.moveSince >= 4 && b.root.position.distanceTo(player.root.position) < 6.5) react(b, Math.random() < 0.5 ? 1 : 2, player, BEAT*4);
+    else if (r < 0.58 && !b.react){ const h = people().find(o => o.move > 0 && !(o === player && (!entered || watching)) && i - o.moveSince >= 4 && o.root.position.distanceTo(b.root.position) < 6.5); if (h) react(b, Math.random() < 0.5 ? 1 : 2, h, BEAT*4); }
     else if (r >= 0.58 && r < 0.66){ if (sitDown(b)){ b.mode = 'rest'; b.restUntil = Math.floor(i/4) + 6 + Math.floor(Math.random()*10); } }
     else if (r > 0.8 && b.move === 0) b.pending = 1 + Math.floor(Math.random()*MOVES);
   });
@@ -679,13 +711,131 @@ function onBeat(i){
     if (o === b || o.isDj) return; const dx = b.root.position.x - o.root.position.x, dz = b.root.position.z - o.root.position.z, d = Math.hypot(dx, dz);
     if (d < 0.95){ const a = d > 0.01 ? Math.atan2(dz, dx) : Math.random()*Math.PI*2; b.target.set(o.root.position.x + Math.cos(a)*1.3, 0, o.root.position.z + Math.sin(a)*1.3); clampFloor(b.target); }
   }); });
-  if (i % 4 === 0) botBar(i);
+  if (i % 4 === 0){ botBar(i); if (net.open && net.host) balanceBots(); }
   if (i % 2 === 0) botThink(i);
   avatars.forEach(a => { if (a.pending >= 0){ if (a.pending !== a.move) a.moveSince = i; a.move = a.pending; a.pending = -1; } });
   if (i % 8 === 0) dj.move = dj.move === 4 ? 2 : 4;
   findGroups();
   if (bestTier >= 3 && i % 4 === 0) launchFirework();
 }
+
+/* ---------- Together: other people in the same room (no chat, only movement, dances and fixed reactions) ---------- */
+const qs = new URLSearchParams(location.search), LOCAL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const SERVER = (LOCAL && qs.get('server')) || '';
+const rid = () => Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+// Anonymous visit number for daily counts: a random code kept in this browser only. No name, e-mail or IP is stored.
+let vid = ''; try { vid = localStorage.getItem('bk_vid') || ''; if (!/^[a-z0-9]{8,40}$/.test(vid)){ vid = rid(); localStorage.setItem('bk_vid', vid); } } catch (e){ vid = rid(); }
+const net = {ws:null, open:false, host:false, id:'', n:1, room:0, retry:0, timer:0, entered:false, sent:new Map(), last:0, pings:[]};
+const remote = new Map();
+const people = () => [player].concat([...remote.values()].filter(a => !a.bot));
+const findAv = id => id === net.id ? player : remote.get(id) || bots.find(b => b.nid === id) || null;
+function send(m){ if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(m)); }
+function showWho(){ const w = $('who'); w.hidden = !net.open; w.textContent = '함께 ' + net.n + '명 · ' + net.room + '번 방'; }
+
+function connect(){
+  if (!SERVER || !entered || net.ws) return;
+  clearTimeout(net.timer);
+  let ws; try { ws = new WebSocket(SERVER + '?place=' + placeId); } catch (e){ retry(); return; }
+  net.ws = ws;
+  ws.onopen = () => { ws.send(JSON.stringify({t:'hi', name:myId, v:myVariant, vid, enter:net.entered ? 0 : 1})); ping(); };
+  ws.onmessage = e => { if (net.ws !== ws) return; let m; try { m = JSON.parse(e.data); } catch (err){ return; } onNet(m); };
+  ws.onclose = () => { if (net.ws !== ws) return; net.ws = null; goSolo(); retry(); };
+}
+function retry(){ clearTimeout(net.timer); net.retry = Math.min(30000, (net.retry || 1000)*2); net.timer = setTimeout(connect, net.retry); }
+function reconnect(){ const w = net.ws; net.ws = null; if (w) try { w.close(); } catch (e){} goSolo(); net.retry = 0; connect(); }
+function ping(){ send({t:'p', c:performance.now()}); }
+setInterval(() => { if (net.open) ping(); }, 25000);
+document.addEventListener('visibilitychange', () => { if (net.open) send({t:document.hidden ? 'away' : 'back'}); });
+
+// Back to dancing alone: everyone else disappears and the five computer dancers return.
+function goSolo(){
+  const was = net.open; net.open = false; net.host = false; net.id = ''; net.n = 1;
+  remote.forEach(av => removeAvatar(av)); remote.clear();
+  if (was || bots.length < 5) fillBots(5);
+  showWho();
+}
+function spawnBot(){ const a = Math.random()*Math.PI*2, d = 2 + Math.random()*6.5; return addBot(Math.cos(a)*d, Math.sin(a)*d); }
+function fillBots(want){ while (bots.length < want) spawnBot(); while (bots.length > want) removeAvatar(bots[bots.length - 1]); }
+const botMsg = b => ({t:'b', op:'add', id:b.nid, name:b.name, v:b.variant, x:+b.root.position.x.toFixed(2), z:+b.root.position.z.toFixed(2), m:b.move});
+// About six dancers in total: one person + five computer dancers, and they step out as more people arrive.
+function balanceBots(){
+  const want = Math.max(0, Math.min(5, 6 - net.n));
+  if (bots.length < want){ const b = spawnBot(); send(botMsg(b)); }
+  else if (bots.length > want){ const b = bots.find(o => !o.seat && o.mode === 'free') || bots[0]; send({t:'b', op:'del', id:b.nid}); net.sent.delete(b.nid); removeAvatar(b); }
+}
+function addRemote(p){
+  if (!p || remote.has(p.id) || p.id === net.id) return null;
+  const av = makeAvatar(p.name, p.v, false); av.nid = p.id; av.bot = !!p.bot; av.variant = p.v;
+  place(av, p.x, p.z); av.face = av.home = 0; av.moveSince = -1e9; remote.set(p.id, av); applyState(av, p); return av;
+}
+function applyState(av, p){
+  if (Math.hypot(av.root.position.x - p.x, av.root.position.z - p.z) > 4) place(av, p.x, p.z);
+  av.target.set(p.tx, 0, p.tz); clampFloor(av.target);
+  const st = p.seat >= 0 ? seats[p.seat] || null : null;
+  if (st !== av.seat){ standUp(av); if (st && !st.by){ st.by = av; av.seat = st; av.item = placeId === 1 ? 0 : 1 + Math.floor(Math.random()*2); av.target.set(st.x, 0, st.z); } }
+  av.pending = p.m !== av.move ? p.m : -1;
+}
+function snap(av){
+  const p = av.root.position, r = v => Math.round(v*100)/100;
+  return {x:r(p.x), z:r(p.z), tx:r(av.target.x), tz:r(av.target.z), m:av.pending >= 0 ? av.pending : av.move, seat:av.seat ? seats.indexOf(av.seat) : -1};
+}
+// Send only what changed, at most about seven times a second.
+function netTick(now){
+  if (!net.open || now - net.last < 150) return;
+  const list = net.host ? [player].concat(bots) : [player];
+  for (const av of list){
+    const st = snap(av), k = st.tx + ',' + st.tz + ',' + st.m + ',' + st.seat;
+    if (net.sent.get(av.nid) === k) continue;
+    net.sent.set(av.nid, k); net.last = now;
+    send(av === player ? Object.assign({t:'s'}, st) : Object.assign({t:'b', op:'s', id:av.nid}, st));
+  }
+}
+function takeBots(list){
+  // This screen now runs the computer dancers.
+  list.forEach(p => {
+    let av = remote.get(p.id);
+    if (av){ remote.delete(p.id); av.mode = 'free'; av.home = (Math.random() - 0.5)*0.9; av.social = 0.6 + Math.random()*0.7; bots.push(av); }
+    else { av = addBot(p.x, p.z, p.name, p.v, p.id, p.m); av.target.set(p.tx, 0, p.tz); }
+  });
+}
+function onNet(m){
+  if (m.t === 'p'){
+    const now = performance.now(), rtt = now - m.c;
+    net.pings.push({rtt, off:m.s + rtt/2 - (now + perfBase)}); if (net.pings.length > 6) net.pings.shift();
+    const best = net.pings.reduce((a, b) => b.rtt < a.rtt ? b : a);
+    const moved = Math.abs(best.off - clockOffset) > 30; clockOffset = best.off; if (moved) syncAudio(false);
+    if (net.pings.length < 4) setTimeout(ping, 400);
+  } else if (m.t === 'w'){
+    net.open = true; net.retry = 0; net.entered = true; net.id = m.you.id; net.host = m.host; net.n = m.n; net.room = m.room; net.sent.clear();
+    player.nid = m.you.id;
+    remote.forEach(av => removeAvatar(av)); remote.clear();
+    m.peers.forEach(addRemote);
+    if (m.host){
+      if (m.bots.length){ fillBots(0); takeBots(m.bots); }
+      else { fillBots(Math.max(0, Math.min(5, 6 - net.n))); bots.forEach(b => send(botMsg(b))); }
+    } else { fillBots(0); m.bots.forEach(addRemote); }
+    showWho();
+  } else if (m.t === 'j'){
+    addRemote(m.p); if (m.n) net.n = m.n; showWho();
+  } else if (m.t === 'l'){
+    const av = remote.get(m.id); if (av){ remote.delete(m.id); removeAvatar(av); }
+    if (m.n) net.n = m.n; showWho();
+  } else if (m.t === 's'){
+    const av = remote.get(m.id); if (av) applyState(av, m);
+  } else if (m.t === 'r'){
+    const a = findAv(m.id), b = findAv(m.to); if (!a || a === player) return;
+    react(a, m.k, b, 1.7);
+    if (b) setTimeout(() => react(b, 3, a, 1.8), 700);
+  } else if (m.t === 'h'){
+    net.host = true; takeBots(m.bots || []); net.sent.clear();
+  } else if (m.t === 'h0'){
+    // Someone else runs the computer dancers now; keep showing them as they are.
+    net.host = false;
+    bots.slice().forEach(b => { bots.splice(bots.indexOf(b), 1); b.bot = true; b.mode = 'free'; b.leader = null; remote.set(b.nid, b); });
+  }
+}
+
+if (LOCAL) window.__bk = {avatars, bots, remote, net, player, beat:() => beatNow()}; // local testing only
 
 /* ---------- Animation: soft squash-and-stretch bounces ---------- */
 const TAU = Math.PI*2;
@@ -770,7 +920,7 @@ window.addEventListener('keyup', e => { held.delete(e.code); });
 function playerReact(type){
   if (!entered) return;
   let best = null, bd = 1e9;
-  bots.forEach(o => { const d = o.root.position.distanceTo(player.root.position) - (o.move > 0 ? 3 : 0); if (d < bd){ bd = d; best = o; } });
+  avatars.forEach(o => { if (o === player || o.isDj) return; const d = o.root.position.distanceTo(player.root.position) - (o.move > 0 ? 3 : 0); if (d < bd){ bd = d; best = o; } });
   react(player, type, best, 1.7);
   if (best) setTimeout(() => react(best, 3, player, 1.8), 700);
 }
@@ -802,7 +952,7 @@ function setPlace(p){
   avatars.forEach(a => { a.helmet.visible = p === 1; if (p === 1) a.item = 0; else if (a.seat && !a.item) a.item = 1 + Math.floor(Math.random()*2); });
   $('pl0').setAttribute('aria-pressed', String(p === 0)); $('pl1').setAttribute('aria-pressed', String(p === 1));
 }
-function goPlace(p){ if (p === placeId) return; const f = $('fade'); f.classList.add('on'); setTimeout(() => { setPlace(p); f.classList.remove('on'); }, 480); }
+function goPlace(p){ if (p === placeId) return; const f = $('fade'); f.classList.add('on'); setTimeout(() => { setPlace(p); if (entered) reconnect(); f.classList.remove('on'); }, 480); }
 $('pl0').addEventListener('click', () => goPlace(0)); $('pl1').addEventListener('click', () => goPlace(1));
 $('btnPlace').addEventListener('click', () => goPlace(placeId === 0 ? 1 : 0));
 $('btnSound').addEventListener('click', () => {
@@ -820,7 +970,8 @@ $('btnEnter').addEventListener('click', () => {
   const y = player.tag.position.y; player.root.remove(player.tag); player.tag = nameTag(myId, true); player.tag.position.y = y; player.root.add(player.tag);
   $('meTag').textContent = myId; $('gate').hidden = true; $('hudTop').hidden = false; $('hudBottom').hidden = false;
   startAudio();
-  avatars.forEach(a => { a.moveSince = 0; a.cool = 0; a.joinUntil = Math.min(a.joinUntil, 8); });
+  avatars.forEach(a => { a.moveSince = 0; a.cool = 0; });
+  connect();
 });
 
 /* ---------- Zoom: mouse wheel, or pinch with two fingers ---------- */
@@ -842,6 +993,7 @@ function frame(now){
   if (bi !== lastBeat){ lastBeat = bi; onBeat(bi); }
   const soft = (1 + Math.cos(TAU*b))/2, t = now/1000;
   keyWalk();
+  netTick(now);
   applyMood(Math.floor(bi/4/MOOD_BARS) % 3, dt);
   avatars.forEach(a => animate(a, b, dt));
 

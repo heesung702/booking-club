@@ -16,6 +16,8 @@ service-account*.json
 *.secret
 .npmrc
 .netrc
+.dev.vars
+.dev.vars.*
 
 # 의존성 / 빌드 결과
 node_modules/
@@ -23,6 +25,7 @@ dist/
 build/
 .cache/
 coverage/
+.wrangler/
 
 # 로그
 *.log
